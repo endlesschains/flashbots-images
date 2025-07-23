@@ -1,0 +1,189 @@
+name: Build Dummy Cache
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-buildernet-image:
+    name: "Build Dummy Cache"
+    runs-on: warp-ubuntu-latest-x64-4x
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debian-archive-keyring systemd-container qemu-system-x86 qemu-utils ovmf
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Cache Nix store
+        uses: WarpBuilds/cache@v1
+        with:
+          path: |
+            /nix/store
+            ~/.cache/nix
+          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            nix-${{ runner.os }}-
+
+      - name: Cache mkosi build artifacts
+        uses: WarpBuilds/cache@v1
+        with:
+          path: |
+            mkosi.cache
+            mkosi.builddir
+            ~/.cache/mkosi
+          key: mkosi-${{ runner.os }}-${{ hashFiles('*.conf', 'mkosi.*') }}
+          restore-keys: |
+            mkosi-${{ runner.os }}-
+
+      - name: Verify cache contents
+        run: |
+          echo "::group::Cache Verification"
+          
+          # Check Nix store cache
+          if [ -d "/nix/store" ]; then
+            NIX_STORE_SIZE=$(du -sh /nix/store 2>/dev/null | cut -f1 || echo "0")
+            NIX_STORE_COUNT=$(find /nix/store -maxdepth 1 -type d 2>/dev/null | wc -l || echo "0")
+            echo "✅ Nix store: $NIX_STORE_SIZE ($NIX_STORE_COUNT entries)"
+          else
+            echo "ℹ️ Nix store cache not found (first run)"
+          fi
+          
+          # Check mkosi cache
+          if [ -d "mkosi.cache" ]; then
+            MKOSI_CACHE_SIZE=$(du -sh mkosi.cache 2>/dev/null | cut -f1 || echo "0")
+            echo "✅ mkosi cache: $MKOSI_CACHE_SIZE"
+          else
+            echo "ℹ️ mkosi cache not found (first run)"
+            mkdir -p mkosi.cache mkosi.builddir ~/.cache/mkosi
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Allow unrestricted user namespaces
+        shell: bash
+        run: |
+          sudo sysctl --ignore --write kernel.apparmor_restrict_unprivileged_unconfined=0
+          sudo sysctl --ignore --write kernel.apparmor_restrict_unprivileged_userns=0
+      
+      - name: Remove security hardening features
+        shell: bash
+        run: |
+          # This command fails with a non-zero error code even though it unloads the apparmor profiles.
+          # https://gitlab.com/apparmor/apparmor/-/issues/403
+          sudo aa-teardown || true
+          sudo apt-get remove -y apparmor
+
+      # - name: Build kernel
+      #   run: |
+      #     nix build .#kernel
+
+      - name: Build buildernet image
+        run: |
+          echo "::group::Build Buildernet Image"
+          nix develop --command mkosi --force -I tdx-dummy.conf
+          echo "::endgroup::"
+
+      - name: Verify build output
+        run: |
+          echo "::group::Verify Build Output"
+          
+          # Check if build directory exists
+          if [ ! -d "build" ]; then
+            echo "❌ Build directory not found"
+            exit 1
+          fi
+          
+          # Check if the EFI image exists
+          if [ ! -f "build/tdx-debian.efi" ]; then
+            echo "❌ EFI image not found at build/tdx-debian.efi"
+            ls -la build/ || echo "Build directory is empty"
+            exit 1
+          fi
+          
+          # Check file size and type
+          FILE_SIZE=$(stat -c%s "build/tdx-debian.efi")
+          FILE_TYPE=$(file "build/tdx-debian.efi")
+          
+          echo "✅ EFI image found: build/tdx-debian.efi"
+          echo "📊 File size: $FILE_SIZE bytes ($(numfmt --to=iec $FILE_SIZE))"
+          echo "🔍 File type: $FILE_TYPE"
+          
+          # Check if it's actually an EFI executable
+          if echo "$FILE_TYPE" | grep -qi "PE32+\|EFI"; then
+            echo "✅ File appears to be a valid EFI executable"
+          else
+            echo "⚠️ Warning: File may not be a valid EFI executable"
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Create persistent storage
+        run: |
+          echo "::group::Create Persistent Storage"
+          qemu-img create -f qcow2 persistent.qcow2 2048G
+          echo "✅ Created persistent.qcow2 (2TB)"
+          echo "::endgroup::"
+
+      - name: Test image boot
+        run: |
+          echo "::group::Test Image Boot"
+          
+          # Start QEMU in background with timeout
+          timeout 60s sudo qemu-system-x86_64 \
+            -enable-kvm \
+            -machine type=q35,smm=on \
+            -m 4096M \
+            -nographic \
+            -serial mon:stdio \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+            -drive file=/usr/share/OVMF/OVMF_VARS.fd,if=pflash,format=raw \
+            -kernel build/tdx-debian.efi \
+            -netdev user,id=net0 \
+            -device virtio-net-pci,netdev=net0 \
+            -device virtio-scsi-pci,id=scsi0 \
+            -drive file=persistent.qcow2,format=qcow2,if=none,id=disk0 \
+            -device scsi-hd,drive=disk0,bus=scsi0.0,channel=0,scsi-id=0,lun=10 \
+            -append "console=ttyS0 panic=1" \
+            > boot_test.log 2>&1 &
+          
+          QEMU_PID=$!
+          echo "🚀 Started QEMU (PID: $QEMU_PID)"
+          
+          # Wait for boot or timeout
+          sleep 30
+          
+          # Check if QEMU is still running
+          if kill -0 $QEMU_PID 2>/dev/null; then
+            echo "✅ QEMU is running - image appears to boot successfully"
+            sudo kill $QEMU_PID
+            wait $QEMU_PID 2>/dev/null || true
+          else
+            echo "❌ QEMU exited early - checking logs"
+            cat boot_test.log
+            exit 1
+          fi
+          
+          # Show boot log snippet
+          echo "📋 Boot log (last 20 lines):"
+          tail -20 boot_test.log || echo "No boot log available"
+          
+          echo "::endgroup::"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: "buildernet-image"
+          path: |
+            build/tdx-debian.efi
+            boot_test.log
+          retention-days: 7
