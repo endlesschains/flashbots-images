@@ -1,13 +1,13 @@
-name: Build and Test WARP
+name: Build Buildernet
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
 
 jobs:
   build-buildernet-image:
-    name: "Build Buildernet WARP Image"
+    name: "Build Buildernet"
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - name: Checkout

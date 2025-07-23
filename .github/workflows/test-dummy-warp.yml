@@ -1,4 +1,4 @@
-name: Build and Test WARP
+name: Build Dummy
 
 on:
   workflow_dispatch:
@@ -7,8 +7,8 @@ on:
 
 jobs:
   build-buildernet-image:
-    name: "Build Dummy WARP Image"
-    runs-on: warp-ubuntu-latest-x64-8x
+    name: "Build Dummy"
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y debian-archive-keyring systemd-container
+          sudo apt-get install -y debian-archive-keyring systemd-container qemu-system-x86 qemu-utils ovmf
 
       - name: Install Nix
         uses: cachix/install-nix-action@v27
@@ -48,14 +48,97 @@ jobs:
           nix develop --command mkosi --force -I tdx-dummy.conf
           echo "::endgroup::"
 
-      # - name: Test image build
-      #   run: |
-      #     echo "::group::Verify Build Output"
-      #     if [ -d "build/" ]; then
-      #       echo "✅ Build directory created successfully"
-      #       ls -la build/
-      #     else
-      #       echo "❌ Build directory not found"
-      #       exit 1
-      #     fi
-      #     echo "::endgroup::"
+      - name: Verify build output
+        run: |
+          echo "::group::Verify Build Output"
+          
+          # Check if build directory exists
+          if [ ! -d "build" ]; then
+            echo "❌ Build directory not found"
+            exit 1
+          fi
+          
+          # Check if the EFI image exists
+          if [ ! -f "build/tdx-debian.efi" ]; then
+            echo "❌ EFI image not found at build/tdx-debian.efi"
+            ls -la build/ || echo "Build directory is empty"
+            exit 1
+          fi
+          
+          # Check file size and type
+          FILE_SIZE=$(stat -c%s "build/tdx-debian.efi")
+          FILE_TYPE=$(file "build/tdx-debian.efi")
+          
+          echo "✅ EFI image found: build/tdx-debian.efi"
+          echo "📊 File size: $FILE_SIZE bytes ($(numfmt --to=iec $FILE_SIZE))"
+          echo "🔍 File type: $FILE_TYPE"
+          
+          # Check if it's actually an EFI executable
+          if echo "$FILE_TYPE" | grep -qi "PE32+\|EFI"; then
+            echo "✅ File appears to be a valid EFI executable"
+          else
+            echo "⚠️ Warning: File may not be a valid EFI executable"
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Create persistent storage
+        run: |
+          echo "::group::Create Persistent Storage"
+          qemu-img create -f qcow2 persistent.qcow2 2048G
+          echo "✅ Created persistent.qcow2 (2TB)"
+          echo "::endgroup::"
+
+      - name: Test image boot
+        run: |
+          echo "::group::Test Image Boot"
+          
+          # Start QEMU in background with timeout
+          timeout 60s sudo qemu-system-x86_64 \
+            -enable-kvm \
+            -machine type=q35,smm=on \
+            -m 4096M \
+            -nographic \
+            -serial mon:stdio \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+            -drive file=/usr/share/OVMF/OVMF_VARS.fd,if=pflash,format=raw \
+            -kernel build/tdx-debian.efi \
+            -netdev user,id=net0 \
+            -device virtio-net-pci,netdev=net0 \
+            -device virtio-scsi-pci,id=scsi0 \
+            -drive file=persistent.qcow2,format=qcow2,if=none,id=disk0 \
+            -device scsi-hd,drive=disk0,bus=scsi0.0,channel=0,scsi-id=0,lun=10 \
+            -append "console=ttyS0 panic=1" \
+            > boot_test.log 2>&1 &
+          
+          QEMU_PID=$!
+          echo "🚀 Started QEMU (PID: $QEMU_PID)"
+          
+          # Wait for boot or timeout
+          sleep 30
+          
+          # Check if QEMU is still running
+          if kill -0 $QEMU_PID 2>/dev/null; then
+            echo "✅ QEMU is running - image appears to boot successfully"
+            sudo kill $QEMU_PID
+            wait $QEMU_PID 2>/dev/null || true
+          else
+            echo "❌ QEMU exited early - checking logs"
+            cat boot_test.log
+            exit 1
+          fi
+          
+          # Show boot log snippet
+          echo "📋 Boot log (last 20 lines):"
+          tail -20 boot_test.log || echo "No boot log available"
+          
+          echo "::endgroup::"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: "buildernet-image"
+          path: |
+            build/tdx-debian.efi
+            boot_test.log
+          retention-days: 7
