@@ -7,8 +7,8 @@ on:
 
 jobs:
   build-buildernet-image:
-    name: "Build Buildernet WARP Image"
-    runs-on: warp-ubuntu-latest-x64-4x
+    name: "Build Dummy WARP Image"
+    runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
       - name: Build buildernet image
         run: |
           echo "::group::Build Buildernet Image"
-          nix develop -c mkosi --force -I buildernet.conf
+          nix develop --command mkosi --force -I tdx-dummy.conf
           echo "::endgroup::"
 
       # - name: Test image build
