@@ -10,12 +10,12 @@ set -euxo pipefail
 # fi
 
 # Find and process all mustache templates in skeleton directory
-find buildernet/mkosi.skeleton -type f -name "*.mustache" | while read -r template; do
-    rel_path="${template#buildernet/mkosi.skeleton/}"
-    output_path="$BUILDROOT/${rel_path%.mustache}"
-    mustache "$ENV_FILE" "$template" > "$output_path"
-    rm "$BUILDROOT/$rel_path"
-done
+# find buildernet/mkosi.skeleton -type f -name "*.mustache" | while read -r template; do
+#     rel_path="${template#buildernet/mkosi.skeleton/}"
+#     output_path="$BUILDROOT/${rel_path%.mustache}"
+#     mustache "$ENV_FILE" "$template" > "$output_path"
+#     rm "$BUILDROOT/$rel_path"
+# done
 
 # Download rbuilder-bidding binary
 # export rbuilder_version="v0.4.2"
@@ -27,5 +27,7 @@ done
 # chmod +x "$BUILDROOT/usr/bin/bidding-service"
 
 # Set permissions of templated files
-chmod 640 "$BUILDROOT/etc/rbuilder.config"
-chmod 600 "$BUILDROOT/etc/rclone.conf"
+# chmod 640 "$BUILDROOT/etc/rbuilder.config"
+# chmod 600 "$BUILDROOT/etc/rclone.conf"
+
+
