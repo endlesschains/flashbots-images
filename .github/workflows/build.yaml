@@ -31,5 +31,4 @@ jobs:
       - name: Build image
         run: |
           umask 022
-          nix develop --command mkosi --force -I bob-l1.conf
-
+          nix develop --command mkosi --force -I bob-l1.conf --image-id=bob-l1
