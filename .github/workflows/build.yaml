@@ -104,14 +104,6 @@ jobs:
           umask 022
           nix develop --command mkosi --force -I ${{ matrix.image }}.conf --image-id=${{ matrix.image }}
 
-      - name: Generate SHA256 checksums
-        run: |
-          cd build/
-          TIMESTAMP=$(git show -s --format=%ct HEAD)
-          SHORT_SHA="${GITHUB_SHA::8}"
-          CHECKSUM_FILE="${{ matrix.image }}_${TIMESTAMP}_${SHORT_SHA}.sha256"
-          sha256sum ${{ matrix.image }}_* | tee "$CHECKSUM_FILE"
-
       - name: Show build artifacts
         if: always()
         run: |
@@ -127,3 +119,12 @@ jobs:
           else
             echo "⚠️  Build directory not found"
           fi
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd build/
+          TIMESTAMP=$(git show -s --format=%ct HEAD)
+          SHORT_SHA="${GITHUB_SHA::8}"
+          CHECKSUM_FILE="${{ matrix.image }}_${TIMESTAMP}_${SHORT_SHA}.sha256"
+          sha256sum ${{ matrix.image }}_* > "$CHECKSUM_FILE"
+          cat "$CHECKSUM_FILE"
