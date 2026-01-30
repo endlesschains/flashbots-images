@@ -73,11 +73,11 @@ jobs:
           fi
 
   build:
-    needs: prepare
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
-        image: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        image: ${{ fromJSON(needs.validate.outputs.matrix) }}
 
     name: build ${{ matrix.image }} image
     runs-on: warp-ubuntu-latest-x64-32x
