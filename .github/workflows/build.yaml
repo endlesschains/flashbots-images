@@ -1,4 +1,11 @@
-name: release
+# GitHub Actions workflow for building mkosi images using Nix.
+#
+# Triggers on:
+# - pushes to the main branch
+#  via manual dispatch (allows specifying a branch to build)
+
+name: Build mkosi images
+
 on:
   push:
     branches:
@@ -10,10 +17,43 @@ on:
         required: false
         default: 'main'
         type: string
+      images:
+        description: 'Images to build (comma-separated: bob-l1,bob-l2 or "all")'
+        required: false
+        default: 'all'
+        type: string
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix based on input
+        id: set-matrix
+        run: |
+          # Default images for push events or when "all" is specified
+          all_images='["bob-l1","bob-l2"]'
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.images }}" != "all" ]; then
+            # Convert comma-separated string to JSON array
+            images="${{ inputs.images }}"
+            # Remove spaces, split by comma, create JSON array
+            json_array=$(echo "$images" | tr -d ' ' | jq -R -c 'split(",") | map(select(length > 0))')
+            echo "matrix=$json_array" >> $GITHUB_OUTPUT
+            echo "Building images: $json_array"
+          else
+            echo "matrix=$all_images" >> $GITHUB_OUTPUT
+            echo "Building all images: $all_images"
+          fi
+
   build:
-    name: build image
+    needs: prepare
+    strategy:
+      matrix:
+        image: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+
+    name: build ${{ matrix.image }} image
     runs-on: warp-ubuntu-latest-x64-32x
     steps:
       - uses: actions/checkout@v5
@@ -33,7 +73,7 @@ jobs:
       - name: Enable user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      - name: Build bob-l1  image
+      - name: Build ${{ matrix.image }} image
         run: |
           umask 022
-          nix develop --command mkosi --force -I bob-l1.conf --image-id=bob-l1
+          nix develop --command mkosi --force -I ${{ matrix.image }}.conf --image-id=${{ matrix.image }}
