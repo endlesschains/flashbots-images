@@ -58,8 +58,7 @@ jobs:
 
             # Fail if any invalid images
             if [ ${#invalid_images[@]} -gt 0 ]; then
-              echo "❌ Error: Invalid image(s)"
-              echo "Invalid image(s): ${invalid_images[*]}" >&2
+              echo "❌ Error: Invalid image(s): ${invalid_images[*]}"
               echo "Valid images are: ${valid_images[*]}"
               exit 1
             fi
