@@ -1,8 +1,15 @@
 name: release
 on:
   push:
-    branches: [main]
-  workflow_dispatch: {}
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: false
+        default: 'main'
+        type: string
 
 jobs:
   build:
@@ -10,44 +17,8 @@ jobs:
     runs-on: warp-ubuntu-latest-x64-32x
     steps:
       - uses: actions/checkout@v5
-
-      # 1. Cache the Linux Kernel (Version 6.13.12)
-      # Since you re-use the kernel, this will only rebuild if your configs change.
-      - name: Cache Kernel Build
-        uses: WarpBuilds/cache@v1
         with:
-          path: /buildroot/build/kernel-6.13.12
-          key: kernel-6.13.12-${{ hashFiles('kernel/**/*.config', 'bob-l1/kernel.config') }}
-
-      # 2. Cache Rust (Lighthouse) and Go Build Artifacts
-      # Tie these to lockfiles. Compilation of Lighthouse takes ~18 minutes otherwise.
-      - name: Cache Build Tooling
-        uses: WarpBuilds/cache@v1
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cache/go-build
-            **/target/
-          key: build-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/go.sum') }}
-          restore-keys: |
-            build-tools-${{ runner.os }}-
-
-      # 3. Cache Nix evaluation and downloaded binaries
-      - name: Cache Nix Shell
-        uses: WarpBuilds/cache@v1
-        with:
-          path: ~/.cache/nix
-          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'shell.nix') }}
-
-      # 4. Cache Mkosi / Debian Package Manager
-      # This prevents re-fetching all the Debian Trixie packages shown in your logs.
-      - name: Cache Mkosi Packages
-        uses: WarpBuilds/cache@v1
-        with:
-          path: mkosi.cache
-          key: mkosi-${{ runner.os }}-${{ hashFiles('bob-l1.conf', 'base/*.sh') }}
+          ref: ${{ inputs.branch || github.ref }}
 
       - name: Install tools
         run: |
@@ -62,7 +33,7 @@ jobs:
       - name: Enable user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      - name: Build bob-l1 image
+      - name: Build bob-l1  image
         run: |
           umask 022
-          nix develop --command mkosi --force --cache-dir=mkosi.cache -I bob-l1.conf --image-id=bob-l1
+          nix develop --command mkosi --force -I bob-l1.conf --image-id=bob-l1
