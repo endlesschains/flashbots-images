@@ -72,14 +72,6 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y debian-archive-keyring
 
-      - name: Cache Nix
-        uses: WarpBuilds/cache@v1
-        with:
-          path: ~/.cache/nix
-          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
-          restore-keys: |
-            nix-${{ runner.os }}-
-
       - name: Install Nix
         uses: cachix/install-nix-action@v27
         with:
