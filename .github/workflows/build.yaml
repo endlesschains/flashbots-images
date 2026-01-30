@@ -39,19 +39,37 @@ jobs:
       - name: Set matrix based on input
         id: set-matrix
         run: |
-          # Default images for push events or when "all" is specified
+          # Allowlist of valid images
+          valid_images=("bob-l1" "bob-l2")
           all_images='["bob-l1","bob-l2"]'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.images }}" != "all" ]; then
-            # Convert comma-separated string to JSON array
-            images="${{ inputs.images }}"
-            # Remove spaces, split by comma, create JSON array
-            json_array=$(echo "$images" | tr -d ' ' | jq -R -c 'split(",") | map(select(length > 0))')
+            # Convert comma-separated string to array
+            IFS=',' read -ra requested_images <<< "${{ inputs.images }}"
+
+            # Validate each requested image
+            invalid_images=()
+            for img in "${requested_images[@]}"; do
+              img=$(echo "$img" | xargs)  # Trim whitespace
+              if [[ ! " ${valid_images[@]} " =~ " ${img} " ]]; then
+                invalid_images+=("$img")
+              fi
+            done
+
+            # Fail if any invalid images
+            if [ ${#invalid_images[@]} -gt 0 ]; then
+              echo "❌ Error: Invalid image(s): ${invalid_images[*]}"
+              echo "Valid images are: ${valid_images[*]}"
+              exit 1
+            fi
+
+            # Convert to JSON array
+            json_array=$(printf '%s\n' "${requested_images[@]}" | jq -R . | jq -s -c 'map(select(length > 0))')
             echo "matrix=$json_array" >> $GITHUB_OUTPUT
-            echo "Building images: $json_array"
+            echo "✓ Building images: $json_array"
           else
             echo "matrix=$all_images" >> $GITHUB_OUTPUT
-            echo "Building all images: $all_images"
+            echo "✓ Building all images: $all_images"
           fi
 
   build:
