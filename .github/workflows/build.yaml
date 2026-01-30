@@ -1,8 +1,15 @@
 # GitHub Actions workflow for building mkosi images using Nix.
 #
 # Triggers on:
-# - pushes to the main branch
-#  via manual dispatch (allows specifying a branch to build)
+# - Pushes to main branch: Builds all images (bob-l1, bob-l2) in parallel
+#
+# - Manual dispatch: Allows specifying:
+#   - Branch to build from (default: main)
+#   - Images to build (default: bob-l1)
+#     - "all" → builds bob-l1 and bob-l2
+#     - "bob-l1" → builds only bob-l1
+#     - "bob-l2" → builds only bob-l2
+#     - "bob-l1,bob-l2" → builds both
 
 name: Build mkosi images
 
@@ -20,7 +27,7 @@ on:
       images:
         description: 'Images to build (comma-separated: bob-l1,bob-l2 or "all")'
         required: false
-        default: 'all'
+        default: 'bob-l1'
         type: string
 
 jobs:
@@ -50,6 +57,7 @@ jobs:
   build:
     needs: prepare
     strategy:
+      fail-fast: false
       matrix:
         image: ${{ fromJSON(needs.prepare.outputs.matrix) }}
 
@@ -63,6 +71,14 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update && sudo apt-get install -y debian-archive-keyring
+
+      - name: Cache Nix
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/nix
+          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-keys: |
+            nix-${{ runner.os }}-
 
       - name: Install Nix
         uses: cachix/install-nix-action@v27
