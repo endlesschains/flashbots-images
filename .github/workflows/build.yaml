@@ -18,11 +18,37 @@ jobs:
           sudo apt-get update && sudo apt-get install -y \
             debian-archive-keyring
 
+      # - name: Cache Nix store
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       /nix/store
+      #       /nix/var/nix
+      #       ~/.cache/nix
+      #     key: ${{ runner.os }}-nix-${{ hashFiles('flake.lock') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-nix-
+
       - name: Install Nix
         uses: cachix/install-nix-action@v27
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            max-jobs = auto
+            cores = 0
+            # Use all available cores (0 = auto-detect)
+            builders-use-substitutes = true
+
+      # - name: Cache mkosi build artifacts
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       mkosi.cache
+      #       mkosi.packages
+      #       mkosi.builddir
+      #     key: ${{ runner.os }}-mkosi-${{ hashFiles('bob-l1.conf', 'base/**', 'bob-common/**', 'bob-l1/**') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-mkosi-
 
       - name: Enable user namespaces
         run: |
@@ -31,4 +57,6 @@ jobs:
       - name: Build image
         run: |
           umask 022
-          nix develop --command mkosi --force -I bob-l1.conf --image-id=bob-l1
+          # Use all available CPU cores for the build
+          export MAKEFLAGS="-j$(nproc)"
+          nix develop --cores 0 --max-jobs auto --command mkosi -I bob-l1.conf --image-id=bob-l1
